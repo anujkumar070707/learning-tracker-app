@@ -1,0 +1,359 @@
+import { useEffect, useMemo, useState } from 'react';
+
+const initialForm = {
+  name: '',
+  totalTopics: 10,
+  completedTopics: 0,
+  hoursPerTopic: 1,
+  color: '#6366f1'
+};
+
+function formatHours(value) {
+  if (!value && value !== 0) return '0h';
+  if (value >= 1) {
+    return `${value.toFixed(1)}h`;
+  }
+  return `${Math.round(value * 60)}m`;
+}
+
+function App() {
+  const [profile, setProfile] = useState({ name: 'Learning Explorer' });
+  const [languages, setLanguages] = useState([]);
+  const [form, setForm] = useState(initialForm);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const fetchDashboard = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch('/api/dashboard');
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to load dashboard');
+      }
+      setProfile(data.user);
+      setLanguages(data.languages || []);
+      setError('');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDashboard();
+  }, []);
+
+  const summary = useMemo(() => {
+    const totalTopics = languages.reduce((sum, lang) => sum + Number(lang.totalTopics || 0), 0);
+    const completedTopics = languages.reduce((sum, lang) => sum + Number(lang.completedTopics || 0), 0);
+    const totalHours = languages.reduce((sum, lang) => sum + Number(lang.totalHours || 0), 0);
+    const remainingTopics = Math.max(totalTopics - completedTopics, 0);
+    const overallPercent = totalTopics > 0 ? Math.round((completedTopics / totalTopics) * 100) : 0;
+
+    return {
+      totalTopics,
+      completedTopics,
+      remainingTopics,
+      totalHours,
+      overallPercent
+    };
+  }, [languages]);
+
+  const handleProfileUpdate = async () => {
+    try {
+      const response = await fetch('/api/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: profile.name })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || 'Unable to update profile');
+      }
+      setProfile(data.user);
+      setError('');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleAddLanguage = async (event) => {
+    event.preventDefault();
+    try {
+      const payload = {
+        name: form.name.trim(),
+        totalTopics: Number(form.totalTopics),
+        completedTopics: Number(form.completedTopics),
+        hoursPerTopic: Number(form.hoursPerTopic),
+        color: form.color
+      };
+
+      if (!payload.name) {
+        throw new Error('Language name is required');
+      }
+      if (payload.totalTopics <= 0) {
+        throw new Error('Total topics must be greater than zero');
+      }
+      if (payload.completedTopics < 0 || payload.completedTopics > payload.totalTopics) {
+        throw new Error('Completed topics must be between 0 and total topics');
+      }
+
+      const response = await fetch('/api/languages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || 'Unable to add language');
+      }
+      setLanguages(data.languages);
+      setForm(initialForm);
+      setError('');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleDeleteLanguage = async (languageId) => {
+    try {
+      const response = await fetch(`/api/languages/${languageId}`, {
+        method: 'DELETE'
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || 'Unable to delete language');
+      }
+      setLanguages(data.languages);
+      setError('');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleLanguageUpdate = async (languageId, updates) => {
+    try {
+      const response = await fetch(`/api/languages/${languageId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates)
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || 'Unable to update language');
+      }
+      setLanguages(data.languages);
+      setError('');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const renderLanguageCard = (language) => {
+    const percent = language.totalTopics > 0 ? Math.round((language.completedTopics / language.totalTopics) * 100) : 0;
+    const topicsLeft = Math.max(language.totalTopics - language.completedTopics, 0);
+    const timeLeft = Math.max(topicsLeft * language.hoursPerTopic, 0);
+
+    return (
+      <div className="language-card" key={language.id}>
+        <div className="language-header">
+          <div className="language-name-wrap">
+            <span className="language-dot" style={{ background: language.color }}></span>
+            <h3>{language.name}</h3>
+          </div>
+          <button className="delete-btn" onClick={() => handleDeleteLanguage(language.id)}>Delete</button>
+        </div>
+
+        <div className="progress-ring" style={{ ['--progress' || '']: `${percent}%`, ['--ring-color' || '']: language.color }}>
+          <span>{percent}%</span>
+        </div>
+
+        <div className="stats-grid">
+          <div>
+            <label>Total Topics</label>
+            <input
+              type="number"
+              value={language.totalTopics}
+              onChange={(event) => handleLanguageUpdate(language.id, { totalTopics: Number(event.target.value) || 0 })}
+            />
+          </div>
+          <div>
+            <label>Completed</label>
+            <input
+              type="number"
+              value={language.completedTopics}
+              onChange={(event) => handleLanguageUpdate(language.id, { completedTopics: Number(event.target.value) || 0 })}
+            />
+          </div>
+          <div>
+            <label>Hours / Topic</label>
+            <input
+              type="number"
+              step="0.5"
+              value={language.hoursPerTopic}
+              onChange={(event) => handleLanguageUpdate(language.id, { hoursPerTopic: Number(event.target.value) || 0 })}
+            />
+          </div>
+          <div>
+            <label>Color</label>
+            <input
+              type="color"
+              value={language.color}
+              onChange={(event) => handleLanguageUpdate(language.id, { color: event.target.value })}
+            />
+          </div>
+        </div>
+
+        <div className="language-summary">
+          <div>
+            <span>Done</span>
+            <strong>{language.completedTopics}</strong>
+          </div>
+          <div>
+            <span>Left</span>
+            <strong>{topicsLeft}</strong>
+          </div>
+          <div>
+            <span>Time Left</span>
+            <strong>{formatHours(timeLeft)}</strong>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="app-shell">
+      <header className="topbar">
+        <div>
+          <p className="eyebrow">Learning Dashboard</p>
+          <h1>Skill Progress Tracker</h1>
+        </div>
+        <div className="profile-box">
+          <label>Student name</label>
+          <div className="profile-row">
+            <input
+              value={profile.name || ''}
+              onChange={(event) => setProfile({ ...profile, name: event.target.value })}
+            />
+            <button onClick={handleProfileUpdate}>Save</button>
+          </div>
+        </div>
+      </header>
+
+      {error && <div className="alert">{error}</div>}
+
+      {loading ? (
+        <div className="loading">Loading dashboard...</div>
+      ) : (
+        <>
+          <section className="summary-grid">
+            <div className="metric-card accent">
+              <span>Overall progress</span>
+              <strong>{summary.overallPercent}%</strong>
+            </div>
+            <div className="metric-card">
+              <span>Topics done</span>
+              <strong>{summary.completedTopics}</strong>
+            </div>
+            <div className="metric-card">
+              <span>Topics left</span>
+              <strong>{summary.remainingTopics}</strong>
+            </div>
+            <div className="metric-card">
+              <span>Total time</span>
+              <strong>{formatHours(summary.totalHours)}</strong>
+            </div>
+          </section>
+
+          <section className="content-grid">
+            <div className="panel">
+              <h2>Add learning track</h2>
+              <form onSubmit={handleAddLanguage} className="language-form">
+                <div className="form-grid">
+                  <label>
+                    Language
+                    <input
+                      type="text"
+                      value={form.name}
+                      placeholder="Python"
+                      onChange={(event) => setForm({ ...form, name: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    Total topics
+                    <input
+                      type="number"
+                      min="1"
+                      value={form.totalTopics}
+                      onChange={(event) => setForm({ ...form, totalTopics: Number(event.target.value) || 1 })}
+                    />
+                  </label>
+                  <label>
+                    Completed
+                    <input
+                      type="number"
+                      min="0"
+                      value={form.completedTopics}
+                      onChange={(event) => setForm({ ...form, completedTopics: Number(event.target.value) || 0 })}
+                    />
+                  </label>
+                  <label>
+                    Hours/topic
+                    <input
+                      type="number"
+                      min="0.5"
+                      step="0.5"
+                      value={form.hoursPerTopic}
+                      onChange={(event) => setForm({ ...form, hoursPerTopic: Number(event.target.value) || 0.5 })}
+                    />
+                  </label>
+                  <label>
+                    Theme color
+                    <input
+                      type="color"
+                      value={form.color}
+                      onChange={(event) => setForm({ ...form, color: event.target.value })}
+                    />
+                  </label>
+                </div>
+
+                <button type="submit" className="primary-btn">Add track</button>
+              </form>
+            </div>
+
+            <div className="panel">
+              <h2>Learning overview</h2>
+              <div className="overview-box">
+                <div>
+                  <span>Total topics</span>
+                  <strong>{summary.totalTopics}</strong>
+                </div>
+                <div>
+                  <span>Completed</span>
+                  <strong>{summary.completedTopics}</strong>
+                </div>
+                <div>
+                  <span>Remaining</span>
+                  <strong>{summary.remainingTopics}</strong>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="language-grid">
+            {languages.length === 0 ? (
+              <div className="empty-card">No learning languages added yet. Add your first track to begin tracking progress.</div>
+            ) : (
+              languages.map(renderLanguageCard)
+            )}
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
+
+export default App;
